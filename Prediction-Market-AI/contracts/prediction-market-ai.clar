@@ -354,3 +354,103 @@
     (ok payout)
   )
 )
+
+;; Admin functions
+(define-public (pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (var-set contract-paused true)
+    (ok true)
+  )
+)
+
+(define-public (unpause-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (var-set contract-paused false)
+    (ok true)
+  )
+)
+
+(define-public (pause-market (market-id uint))
+  (let ((market (unwrap! (map-get? prediction-markets { market-id: market-id }) ERR-MARKET-NOT-FOUND)))
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (map-set prediction-markets { market-id: market-id }
+      (merge market { paused: true }))
+    (ok true)
+  )
+)
+
+(define-public (update-fees (new-resolution-fee uint) (new-platform-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (<= new-platform-fee u10) ERR-INVALID-FEE) ;; Max 10% fee
+    (var-set resolution-fee new-resolution-fee)
+    (var-set platform-fee new-platform-fee)
+    (ok true)
+  )
+)
+
+(define-public (authorize-resolver (resolver principal))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (map-set authorized-resolvers
+      { resolver: resolver }
+      { authorized: true, resolved-count: u0, reputation-score: u50 })
+    (ok true)
+  )
+)
+
+;; Enhanced read-only functions
+(define-read-only (get-market (market-id uint))
+  (map-get? prediction-markets { market-id: market-id })
+)
+
+(define-read-only (get-user-position (market-id uint) (user principal))
+  (map-get? user-positions { market-id: market-id, user: user })
+)
+
+(define-read-only (get-market-odds (market-id uint))
+  (let
+    (
+      (market (unwrap! (map-get? prediction-markets { market-id: market-id }) (err none)))
+      (yes-shares (get yes-shares market))
+      (no-shares (get no-shares market))
+      (total-shares (+ yes-shares no-shares))
+    )
+    (if (> total-shares u0)
+      (ok { yes-probability: (/ (* yes-shares u100) total-shares), 
+            no-probability: (/ (* no-shares u100) total-shares) })
+      (ok { yes-probability: u50, no-probability: u50 })
+    )
+  )
+)
+
+(define-read-only (get-user-stats (user principal))
+  (default-to 
+    { total-invested: u0, markets-participated: u0, successful-predictions: u0, total-winnings: u0 }
+    (map-get? user-stats { user: user }))
+)
+
+(define-read-only (get-platform-stats)
+  {
+    total-volume: (var-get total-volume),
+    total-markets: (var-get total-markets),
+    resolution-fee: (var-get resolution-fee),
+    platform-fee: (var-get platform-fee),
+    contract-paused: (var-get contract-paused)
+  }
+)
+
+(define-read-only (is-authorized-resolver (resolver principal))
+  (default-to { authorized: false, resolved-count: u0, reputation-score: u0 } 
+    (map-get? authorized-resolvers { resolver: resolver }))
+)
+
+(define-read-only (get-market-count)
+  (var-get market-count)
+)
+
+(define-read-only (get-category-stats (category (string-ascii 50)))
+  (map-get? market-categories { category: category })
+)
