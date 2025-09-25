@@ -22,3 +22,69 @@
 (define-data-var contract-paused bool false)
 (define-data-var total-volume uint u0)
 (define-data-var total-markets uint u0)
+
+(define-map prediction-markets
+  { market-id: uint }
+  {
+    title: (string-ascii 100),
+    description: (string-ascii 500),
+    category: (string-ascii 50),
+    creator: principal,
+    resolution-date: uint,
+    total-volume: uint,
+    yes-shares: uint,
+    no-shares: uint,
+    resolved: bool,
+    outcome: (optional bool),
+    resolver: (optional principal),
+    resolution-block: uint,
+    disputed: bool,
+    paused: bool,
+    min-bet: uint
+  }
+)
+
+(define-map user-positions
+  { market-id: uint, user: principal }
+  {
+    yes-shares: uint,
+    no-shares: uint,
+    total-invested: uint,
+    last-activity-block: uint
+  }
+)
+
+(define-map market-categories
+  { category: (string-ascii 50) }
+  { active: bool, market-count: uint }
+)
+
+(define-map authorized-resolvers
+  { resolver: principal }
+  { authorized: bool, resolved-count: uint, reputation-score: uint }
+)
+
+(define-map market-disputes
+  { market-id: uint }
+  { 
+    disputer: principal,
+    dispute-block: uint,
+    dispute-fee: uint,
+    resolved: bool
+  }
+)
+
+(define-map user-stats
+  { user: principal }
+  {
+    total-invested: uint,
+    markets-participated: uint,
+    successful-predictions: uint,
+    total-winnings: uint
+  }
+)
+
+(define-map liquidity-providers
+  { market-id: uint, provider: principal }
+  { liquidity-amount: uint, shares: uint }
+)
