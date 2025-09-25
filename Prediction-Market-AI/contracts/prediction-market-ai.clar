@@ -179,3 +179,178 @@
     (ok true)
   )
 )
+
+;; Enhanced buy shares with fee calculation
+(define-public (buy-shares (market-id uint) (prediction bool) (amount uint))
+  (let
+    (
+      (market (unwrap! (map-get? prediction-markets { market-id: market-id }) ERR-MARKET-NOT-FOUND))
+      (existing-position (default-to 
+        { yes-shares: u0, no-shares: u0, total-invested: u0, last-activity-block: u0 }
+        (map-get? user-positions { market-id: market-id, user: tx-sender })))
+      (platform-fee-amount (/ (* amount (var-get platform-fee)) u100))
+      (net-amount (- amount platform-fee-amount))
+      (existing-stats (default-to 
+        { total-invested: u0, markets-participated: u0, successful-predictions: u0, total-winnings: u0 }
+        (map-get? user-stats { user: tx-sender })))
+    )
+    (asserts! (not (var-get contract-paused)) ERR-MARKET-PAUSED)
+    (asserts! (< block-height (get resolution-date market)) ERR-MARKET-CLOSED)
+    (asserts! (not (get resolved market)) ERR-ALREADY-RESOLVED)
+    (asserts! (not (get paused market)) ERR-MARKET-PAUSED)
+    (asserts! (>= amount (get min-bet market)) ERR-INVALID-AMOUNT)
+    
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    
+    (if prediction
+      ;; Buy YES shares
+      (begin
+        (map-set user-positions
+          { market-id: market-id, user: tx-sender }
+          (merge existing-position { 
+            yes-shares: (+ (get yes-shares existing-position) net-amount),
+            total-invested: (+ (get total-invested existing-position) amount),
+            last-activity-block: block-height
+          }))
+        (map-set prediction-markets
+          { market-id: market-id }
+          (merge market { 
+            yes-shares: (+ (get yes-shares market) net-amount),
+            total-volume: (+ (get total-volume market) net-amount)
+          }))
+      )
+      ;; Buy NO shares
+      (begin
+        (map-set user-positions
+          { market-id: market-id, user: tx-sender }
+          (merge existing-position { 
+            no-shares: (+ (get no-shares existing-position) net-amount),
+            total-invested: (+ (get total-invested existing-position) amount),
+            last-activity-block: block-height
+          }))
+        (map-set prediction-markets
+          { market-id: market-id }
+          (merge market { 
+            no-shares: (+ (get no-shares market) net-amount),
+            total-volume: (+ (get total-volume market) net-amount)
+          }))
+      )
+    )
+    
+    ;; Update user stats
+    (map-set user-stats { user: tx-sender }
+      (merge existing-stats {
+        total-invested: (+ (get total-invested existing-stats) amount),
+        markets-participated: (if (is-eq (get total-invested existing-position) u0)
+          (+ (get markets-participated existing-stats) u1)
+          (get markets-participated existing-stats))
+      }))
+    
+    (var-set total-volume (+ (var-get total-volume) net-amount))
+    (ok true)
+  )
+)
+
+;; Enhanced resolve market with dispute period
+(define-public (resolve-market (market-id uint) (outcome bool))
+  (let
+    (
+      (market (unwrap! (map-get? prediction-markets { market-id: market-id }) ERR-MARKET-NOT-FOUND))
+      (resolver-auth (default-to { authorized: false, resolved-count: u0, reputation-score: u0 } 
+        (map-get? authorized-resolvers { resolver: tx-sender })))
+    )
+    (asserts! (get authorized resolver-auth) ERR-NOT-AUTHORIZED)
+    (asserts! (>= block-height (get resolution-date market)) ERR-MARKET-CLOSED)
+    (asserts! (not (get resolved market)) ERR-ALREADY-RESOLVED)
+    (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
+    
+    (map-set prediction-markets
+      { market-id: market-id }
+      (merge market { 
+        resolved: true, 
+        outcome: (some outcome),
+        resolver: (some tx-sender),
+        resolution-block: block-height
+      }))
+    
+    (map-set authorized-resolvers
+      { resolver: tx-sender }
+      (merge resolver-auth { 
+        resolved-count: (+ (get resolved-count resolver-auth) u1),
+        reputation-score: (+ (get reputation-score resolver-auth) u10)
+      }))
+    
+    (ok true)
+  )
+)
+
+;; Dispute market resolution
+(define-public (dispute-resolution (market-id uint))
+  (let
+    (
+      (market (unwrap! (map-get? prediction-markets { market-id: market-id }) ERR-MARKET-NOT-FOUND))
+      (dispute-fee (* (var-get resolution-fee) u2))
+    )
+    (asserts! (get resolved market) ERR-INVALID-OUTCOME)
+    (asserts! (< (- block-height (get resolution-block market)) (var-get dispute-period)) ERR-COOLDOWN-ACTIVE)
+    (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
+    
+    (try! (stx-transfer? dispute-fee tx-sender (as-contract tx-sender)))
+    
+    (map-set market-disputes
+      { market-id: market-id }
+      {
+        disputer: tx-sender,
+        dispute-block: block-height,
+        dispute-fee: dispute-fee,
+        resolved: false
+      })
+    
+    (map-set prediction-markets
+      { market-id: market-id }
+      (merge market { disputed: true }))
+    
+    (ok true)
+  )
+)
+
+;; Enhanced claim winnings with stats tracking
+(define-public (claim-winnings (market-id uint))
+  (let
+    (
+      (market (unwrap! (map-get? prediction-markets { market-id: market-id }) ERR-MARKET-NOT-FOUND))
+      (user-position (unwrap! (map-get? user-positions { market-id: market-id, user: tx-sender }) ERR-NOT-AUTHORIZED))
+      (market-outcome (unwrap! (get outcome market) ERR-INVALID-OUTCOME))
+      (total-pool (get total-volume market))
+      (winning-shares (if market-outcome (get yes-shares market) (get no-shares market)))
+      (user-winning-shares (if market-outcome 
+        (get yes-shares user-position) 
+        (get no-shares user-position)))
+      (payout (if (> winning-shares u0) 
+        (/ (* user-winning-shares total-pool) winning-shares)
+        u0))
+      (existing-stats (default-to 
+        { total-invested: u0, markets-participated: u0, successful-predictions: u0, total-winnings: u0 }
+        (map-get? user-stats { user: tx-sender })))
+    )
+    (asserts! (get resolved market) ERR-MARKET-CLOSED)
+    (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
+    (asserts! (> user-winning-shares u0) ERR-INSUFFICIENT-FUNDS)
+    (asserts! (>= (- block-height (get resolution-block market)) (var-get dispute-period)) ERR-DISPUTE-PERIOD)
+    
+    ;; Pay out winnings
+    (try! (as-contract (stx-transfer? payout tx-sender tx-sender)))
+    
+    ;; Update user stats
+    (map-set user-stats { user: tx-sender }
+      (merge existing-stats {
+        successful-predictions: (+ (get successful-predictions existing-stats) u1),
+        total-winnings: (+ (get total-winnings existing-stats) payout)
+      }))
+    
+    ;; Clear user position
+    (map-delete user-positions { market-id: market-id, user: tx-sender })
+    
+    (ok payout)
+  )
+)
