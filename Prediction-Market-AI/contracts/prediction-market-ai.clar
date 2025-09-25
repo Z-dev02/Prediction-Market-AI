@@ -116,7 +116,7 @@
     (
       (market-id (+ (var-get market-count) u1))
       (category-data (unwrap! (map-get? market-categories { category: category }) ERR-INVALID-OUTCOME))
-      (resolution-date (+ block-height resolution-blocks))
+      (resolution-date (+ stacks-block-height resolution-blocks))
     )
     (asserts! (not (var-get contract-paused)) ERR-MARKET-PAUSED)
     (asserts! (get active category-data) ERR-INVALID-OUTCOME)
@@ -162,7 +162,7 @@
       (existing-lp (default-to { liquidity-amount: u0, shares: u0 }
         (map-get? liquidity-providers { market-id: market-id, provider: tx-sender })))
     )
-    (asserts! (< block-height (get resolution-date market)) ERR-MARKET-CLOSED)
+    (asserts! (< stacks-block-height (get resolution-date market)) ERR-MARKET-CLOSED)
     (asserts! (not (get resolved market)) ERR-ALREADY-RESOLVED)
     (asserts! (not (get paused market)) ERR-MARKET-PAUSED)
     (asserts! (>= amount u100) ERR-INVALID-AMOUNT)
@@ -195,7 +195,7 @@
         (map-get? user-stats { user: tx-sender })))
     )
     (asserts! (not (var-get contract-paused)) ERR-MARKET-PAUSED)
-    (asserts! (< block-height (get resolution-date market)) ERR-MARKET-CLOSED)
+    (asserts! (< stacks-block-height (get resolution-date market)) ERR-MARKET-CLOSED)
     (asserts! (not (get resolved market)) ERR-ALREADY-RESOLVED)
     (asserts! (not (get paused market)) ERR-MARKET-PAUSED)
     (asserts! (>= amount (get min-bet market)) ERR-INVALID-AMOUNT)
@@ -210,7 +210,7 @@
           (merge existing-position { 
             yes-shares: (+ (get yes-shares existing-position) net-amount),
             total-invested: (+ (get total-invested existing-position) amount),
-            last-activity-block: block-height
+            last-activity-block: stacks-block-height
           }))
         (map-set prediction-markets
           { market-id: market-id }
@@ -226,7 +226,7 @@
           (merge existing-position { 
             no-shares: (+ (get no-shares existing-position) net-amount),
             total-invested: (+ (get total-invested existing-position) amount),
-            last-activity-block: block-height
+            last-activity-block: stacks-block-height
           }))
         (map-set prediction-markets
           { market-id: market-id }
@@ -260,7 +260,7 @@
         (map-get? authorized-resolvers { resolver: tx-sender })))
     )
     (asserts! (get authorized resolver-auth) ERR-NOT-AUTHORIZED)
-    (asserts! (>= block-height (get resolution-date market)) ERR-MARKET-CLOSED)
+    (asserts! (>= stacks-block-height (get resolution-date market)) ERR-MARKET-CLOSED)
     (asserts! (not (get resolved market)) ERR-ALREADY-RESOLVED)
     (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
     
@@ -270,7 +270,7 @@
         resolved: true, 
         outcome: (some outcome),
         resolver: (some tx-sender),
-        resolution-block: block-height
+        resolution-block: stacks-block-height
       }))
     
     (map-set authorized-resolvers
@@ -292,7 +292,7 @@
       (dispute-fee (* (var-get resolution-fee) u2))
     )
     (asserts! (get resolved market) ERR-INVALID-OUTCOME)
-    (asserts! (< (- block-height (get resolution-block market)) (var-get dispute-period)) ERR-COOLDOWN-ACTIVE)
+    (asserts! (< (- stacks-block-height (get resolution-block market)) (var-get dispute-period)) ERR-COOLDOWN-ACTIVE)
     (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
     
     (try! (stx-transfer? dispute-fee tx-sender (as-contract tx-sender)))
@@ -301,7 +301,7 @@
       { market-id: market-id }
       {
         disputer: tx-sender,
-        dispute-block: block-height,
+        dispute-block: stacks-block-height,
         dispute-fee: dispute-fee,
         resolved: false
       })
@@ -336,7 +336,7 @@
     (asserts! (get resolved market) ERR-MARKET-CLOSED)
     (asserts! (not (get disputed market)) ERR-DISPUTE-PERIOD)
     (asserts! (> user-winning-shares u0) ERR-INSUFFICIENT-FUNDS)
-    (asserts! (>= (- block-height (get resolution-block market)) (var-get dispute-period)) ERR-DISPUTE-PERIOD)
+    (asserts! (>= (- stacks-block-height (get resolution-block market)) (var-get dispute-period)) ERR-DISPUTE-PERIOD)
     
     ;; Pay out winnings
     (try! (as-contract (stx-transfer? payout tx-sender tx-sender)))
